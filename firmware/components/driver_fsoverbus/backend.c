@@ -52,14 +52,14 @@ void fsob_task(void *pvParameters) {
                 if(header == NULL) {
                     return; //This shouldn't happen because we checked if there is data in the buffer
                 }
-                memcpy(header, header_full, fetched);
+                memcpy(header_full, header, fetched);
                 vRingbufferReturnItem(buf_handle, header);
                 if(fetched != PACKET_HEADER_SIZE) {
                     header = (uint8_t *) xRingbufferReceiveUpTo(buf_handle, &fetched_split, 10, PACKET_HEADER_SIZE-fetched);
                     if(header == NULL) {
                         return; //This shouldn't happen because we checked if there is data in the buffer
                     }
-                    memcpy(header, &header_full[fetched], PACKET_HEADER_SIZE-fetched);
+                    memcpy(&header_full[fetched], header, PACKET_HEADER_SIZE-fetched);
                     vRingbufferReturnItem(buf_handle, header);
                 }
 
@@ -84,6 +84,7 @@ void fsob_task(void *pvParameters) {
             fsob_stop_timeout();    //Stop timeout time since we have received some data
             size_t data_sz;
             uint8_t *data = (uint8_t *) xRingbufferReceiveUpTo(buf_handle, &data_sz, 0, RD_BUF_SIZE);
+            recv += data_sz;
             handleFSCommand(data, command, message_id, size, recv, data_sz);
             vRingbufferReturnItem(buf_handle, data);
             if(recv == size) {
@@ -104,7 +105,8 @@ void fsob_init()  {
 }
 
 void fsob_reset()  {
-
+    receiving = 0;
+    clearBuffer();
 }
 
 void fsob_receive_bytes(uint8_t *data, size_t len) {

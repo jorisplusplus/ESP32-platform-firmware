@@ -43,7 +43,7 @@ int getdir(uint8_t *data, uint16_t command, uint32_t message_id, uint32_t size, 
     ESP_LOGI(TAG, "%s", data);
     char dir_name[size+20];   //Take length of the folder and add the spiflash mountpoint
     buildfile((char *) data, dir_name);
-    //ESP_LOGI(TAG, "%s", dir_name);
+    ESP_LOGI(TAG, "%s", dir_name);
     DIR *d;
     struct dirent *dir;
     d = opendir(dir_name);  //Loop through all files/directories

@@ -171,21 +171,31 @@ spi_device_interface_config_t devcfg={
     };
 
 void process_miso(uint8_t *data) {
-
+    if(data[1] == 0xF0) {
+        uint8_t valid_bytes = data[0];
+        for(int i = 0; i < valid_bytes; i++) {
+            ESP_LOGI(TAG, "%x", data[2+i]);
+        }
+        fsob_receive_bytes(&data[2], valid_bytes);
+    }
 }
 
 void stm32_task() {
+    ESP_LOGI(TAG, "Starting stm task");
     for(;;) {
         vTaskDelay(1);
-        if(!gpio_get_level(0)) {
+        if(!gpio_get_level(GPIO_NUM_0)) {
+            
             uint8_t mosi[18] = {0};
             uint8_t miso[18] = {0};
             spi_transaction_t t;
             t.length = 18*8;
+            t.rxlength = 0;
             t.tx_buffer = mosi;
             t.rx_buffer = miso;
             spi_device_transmit(handle, &t);
             process_miso(&miso[9]);
+            ESP_LOGI(TAG, "Fetching spi");
         }
     }
 }
@@ -194,6 +204,11 @@ void spi_init() {
     esp_err_t res = spi_bus_initialize(VSPI_HOST, &buscfg, 1);
     gpio_set_direction(19, GPIO_MODE_OUTPUT);
     spi_bus_add_device(VSPI_HOST, &devcfg, &handle);
+
+ 
+
+    gpio_set_direction(0, GPIO_MODE_INPUT);
+
     xTaskCreatePinnedToCore(stm32_task, "fsoverbus_spi", 16000, NULL, 100, NULL, 0);
 
 }
@@ -202,12 +217,13 @@ void fsob_write_bytes(const char *src, size_t size) {
     while (size > 0) {
         uint8_t mosi[18] = {0};
         uint8_t miso[18] = {0};
-        mosi[1] = 0xFF;
+        mosi[1] = 0xF0;
         mosi[0] = min(size, 6);
-        memcpy(src, &mosi[2], mosi[0]);
+        memcpy(&mosi[2], src, mosi[0]);
         src += mosi[0]; //Increment src pointer with bytes copied
         spi_transaction_t t;
         t.length = 18*8;
+        t.rxlength = 0;
         t.tx_buffer = mosi;
         t.rx_buffer = miso;
         spi_device_transmit(handle, &t);
