@@ -75,6 +75,7 @@ void fsob_task(void *pvParameters) {
                     recv = 0;
                 } else {
                     receiving = 0;
+                    ESP_LOGI(TAG, "Packet header not correct.");
                     clearBuffer();
                     //Received wrong command, flushing uart queue
                 }
@@ -106,6 +107,7 @@ void fsob_init()  {
 
 void fsob_reset()  {
     receiving = 0;
+    ESP_LOGD(TAG, "Wiping buffer...");
     clearBuffer();
 }
 

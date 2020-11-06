@@ -171,11 +171,10 @@ spi_device_interface_config_t devcfg={
     };
 
 void process_miso(uint8_t *data) {
+    ESP_LOGD(TAG, "%x %x %x %x %x %x %x %x %x", data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
     if(data[1] == 0xF0) {
+        ESP_LOGD(TAG, "Data to fsoverbus");
         uint8_t valid_bytes = data[0];
-        for(int i = 0; i < valid_bytes; i++) {
-            ESP_LOGI(TAG, "%x", data[2+i]);
-        }
         fsob_receive_bytes(&data[2], valid_bytes);
     }
 }
@@ -188,14 +187,15 @@ void stm32_task() {
             
             uint8_t mosi[18] = {0};
             uint8_t miso[18] = {0};
-            spi_transaction_t t;
-            t.length = 18*8;
-            t.rxlength = 0;
-            t.tx_buffer = mosi;
-            t.rx_buffer = miso;
+            spi_transaction_t t = {
+            .length = 18*8,
+            .rxlength = 18*8,
+            .tx_buffer = mosi,
+            .rx_buffer = miso
+            };
             spi_device_transmit(handle, &t);
             process_miso(&miso[9]);
-            ESP_LOGI(TAG, "Fetching spi");
+            ESP_LOGI(TAG, "Fetching spi ver: %d", miso[7]);
         }
     }
 }
@@ -218,17 +218,18 @@ void fsob_write_bytes(const char *src, size_t size) {
         uint8_t mosi[18] = {0};
         uint8_t miso[18] = {0};
         mosi[1] = 0xF0;
-        mosi[0] = min(size, 6);
+        mosi[0] = min(size, 12);
         memcpy(&mosi[2], src, mosi[0]);
         src += mosi[0]; //Increment src pointer with bytes copied
-        spi_transaction_t t;
-        t.length = 18*8;
-        t.rxlength = 0;
-        t.tx_buffer = mosi;
-        t.rx_buffer = miso;
+        size = size - mosi[0]; //Decrement remaining bytes to transmit
+        spi_transaction_t t = {
+        .length = 18*8,
+        .rxlength = 18*8,
+        .tx_buffer = mosi,
+        .rx_buffer = miso
+        };
         spi_device_transmit(handle, &t);
-        process_miso(&miso[9]);
-        size = size - min(size, 6);
+        process_miso(&miso[9]);        
     }
 }
 
