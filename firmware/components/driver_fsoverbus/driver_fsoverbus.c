@@ -10,6 +10,7 @@
 #include <driver/gpio.h>
 #include <esp_vfs.h>
 #include <dirent.h>
+#include <esp_intr_alloc.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -163,7 +164,7 @@ spi_device_interface_config_t devcfg={
         .command_bits=0,
         .address_bits=0,
         .dummy_bits=0,
-        .clock_speed_hz=1000000,
+        .clock_speed_hz=500000,
         .duty_cycle_pos=128,
         .mode=0,
         .spics_io_num=19,
@@ -180,24 +181,30 @@ void process_miso(uint8_t *data) {
 }
 
 void stm32_task() {
-    ESP_LOGI(TAG, "Starting stm task");
-    for(;;) {
-        vTaskDelay(1);
-        if(!gpio_get_level(GPIO_NUM_0)) {
-            
-            uint8_t mosi[18] = {0};
-            uint8_t miso[18] = {0};
-            spi_transaction_t t = {
-            .length = 18*8,
-            .rxlength = 18*8,
-            .tx_buffer = mosi,
-            .rx_buffer = miso
-            };
-            spi_device_transmit(handle, &t);
-            process_miso(&miso[9]);
-            ESP_LOGI(TAG, "Fetching spi ver: %d", miso[7]);
-        }
+    for( ;; ) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY );
+        while(!gpio_get_level(GPIO_NUM_0)) {
+                
+                uint8_t mosi[18] = {0};
+                uint8_t miso[18] = {0};
+                spi_transaction_t t = {
+                .length = 18*8,
+                .rxlength = 18*8,
+                .tx_buffer = mosi,
+                .rx_buffer = miso
+                };
+                spi_device_transmit(handle, &t);
+                process_miso(&miso[9]);
+                ESP_LOGI(TAG, "Fetching spi ver: %d", miso[7]);
+                ets_delay_us(500);
+            }
     }
+}
+
+static TaskHandle_t stm32_task_handle = NULL;
+
+void gpio0_intr() {
+     xTaskNotifyGive(stm32_task_handle);
 }
 
 void spi_init() {
@@ -205,11 +212,12 @@ void spi_init() {
     gpio_set_direction(19, GPIO_MODE_OUTPUT);
     spi_bus_add_device(VSPI_HOST, &devcfg, &handle);
 
- 
+    gpio_set_direction(GPIO_NUM_0, GPIO_MODE_INPUT);
+    gpio_isr_handler_add(GPIO_NUM_0, gpio0_intr, NULL);
+    gpio_set_intr_type(GPIO_NUM_0, GPIO_INTR_NEGEDGE);
+    gpio_intr_enable(GPIO_NUM_0);
 
-    gpio_set_direction(0, GPIO_MODE_INPUT);
-
-    xTaskCreatePinnedToCore(stm32_task, "fsoverbus_spi", 16000, NULL, 100, NULL, 0);
+    xTaskCreatePinnedToCore(stm32_task, "fsoverbus_spi", 16000, NULL, 100, &stm32_task_handle, 0);
 
 }
 
@@ -248,7 +256,7 @@ esp_err_t driver_fsoverbus_init(void) {
 
     ESP_LOGI(TAG, "fs over bus registered.");
     
-    timeout = xTimerCreate("FSoverBUS_timeout", 100, false, 0, vTimeoutFunction);
+    timeout = xTimerCreate("FSoverBUS_timeout", 50, false, 0, vTimeoutFunction);
     return ESP_OK;
 } 
 

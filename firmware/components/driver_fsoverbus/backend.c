@@ -10,6 +10,9 @@
 #include "freertos/ringbuf.h"
 
 #define TAG "FSoverBus"
+
+#define min(a,b) (((a) < (b)) ? (a) : (b))
+
 /*
 * Write src array with length size to used bus.
 * Implement this function in custom backend when used. Block function call if not possible to write data until possible.
@@ -43,6 +46,7 @@ void fsob_task(void *pvParameters) {
         if(!receiving) {
             size_t freebuf = xRingbufferGetCurFreeSize(buf_handle);
             if((CONFIG_DRIVER_FSOVERBUS_NOBACKEND_HELPER_Size-freebuf) >= PACKET_HEADER_SIZE) {
+                fsob_stop_timeout();
                 size_t fetched, fetched_split;
                 uint8_t header_full[PACKET_HEADER_SIZE];
                 
@@ -80,16 +84,21 @@ void fsob_task(void *pvParameters) {
                     //Received wrong command, flushing uart queue
                 }
 
+            } else {
+                fsob_start_timeout();
             }
         } else {
             fsob_stop_timeout();    //Stop timeout time since we have received some data
             size_t data_sz;
-            uint8_t *data = (uint8_t *) xRingbufferReceiveUpTo(buf_handle, &data_sz, 0, RD_BUF_SIZE);
+            size_t max_read = min(RD_BUF_SIZE, size-recv);
+            uint8_t *data = (uint8_t *) xRingbufferReceiveUpTo(buf_handle, &data_sz, 0, max_read);
             recv += data_sz;
+            ESP_LOGD(TAG, "len: %d, recv: %d, size: %d", size, recv, data_sz);
             handleFSCommand(data, command, message_id, size, recv, data_sz);
             vRingbufferReturnItem(buf_handle, data);
             if(recv == size) {
-                receiving = 0;                
+                receiving = 0;
+                ESP_LOGD(TAG, "Packet receive complete");                
             } else {
                 fsob_start_timeout(); //Re enable the timeout timer since the message is still not fully received
             }
