@@ -41,66 +41,75 @@ void fsob_task(void *pvParameters) {
     uint32_t size = 0;  //Total message size
     uint32_t recv = 0; //Total bytes received so far
     uint16_t verif = 0; //Verif field
+    uint32_t continue_reading;
     for( ;; ) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY );
-        if(!receiving) {
+        continue_reading = 1;
+        while(continue_reading) {
             size_t freebuf = xRingbufferGetCurFreeSize(buf_handle);
-            if((CONFIG_DRIVER_FSOVERBUS_NOBACKEND_HELPER_Size-freebuf) >= PACKET_HEADER_SIZE) {
-                fsob_stop_timeout();
-                size_t fetched, fetched_split;
-                uint8_t header_full[PACKET_HEADER_SIZE];
-                
-                //Some extra code is necessary incase of wrap around. This part just checks if the fetch is continues. if not fetch another time
+            if(!receiving) {
+                if((CONFIG_DRIVER_FSOVERBUS_NOBACKEND_HELPER_Size-freebuf) >= PACKET_HEADER_SIZE) {
+                    fsob_stop_timeout();
+                    size_t fetched, fetched_split;
+                    uint8_t header_full[PACKET_HEADER_SIZE];
+                    
+                    //Some extra code is necessary incase of wrap around. This part just checks if the fetch is continues. if not fetch another time
 
-                uint8_t *header = (uint8_t *) xRingbufferReceiveUpTo(buf_handle, &fetched, 10, PACKET_HEADER_SIZE);
-                if(header == NULL) {
-                    return; //This shouldn't happen because we checked if there is data in the buffer
-                }
-                memcpy(header_full, header, fetched);
-                vRingbufferReturnItem(buf_handle, header);
-                if(fetched != PACKET_HEADER_SIZE) {
-                    header = (uint8_t *) xRingbufferReceiveUpTo(buf_handle, &fetched_split, 10, PACKET_HEADER_SIZE-fetched);
+                    uint8_t *header = (uint8_t *) xRingbufferReceiveUpTo(buf_handle, &fetched, 10, PACKET_HEADER_SIZE);
                     if(header == NULL) {
                         return; //This shouldn't happen because we checked if there is data in the buffer
                     }
-                    memcpy(&header_full[fetched], header, PACKET_HEADER_SIZE-fetched);
+                    memcpy(header_full, header, fetched);
                     vRingbufferReturnItem(buf_handle, header);
-                }
+                    if(fetched != PACKET_HEADER_SIZE) {
+                        header = (uint8_t *) xRingbufferReceiveUpTo(buf_handle, &fetched_split, 10, PACKET_HEADER_SIZE-fetched);
+                        if(header == NULL) {
+                            return; //This shouldn't happen because we checked if there is data in the buffer
+                        }
+                        memcpy(&header_full[fetched], header, PACKET_HEADER_SIZE-fetched);
+                        vRingbufferReturnItem(buf_handle, header);
+                    }
 
-                //Check the payload header
-                command = *((uint16_t *) &header_full[0]);
-                size = *((uint32_t *) &header_full[2]);
-                verif = *((uint16_t *) &header_full[6]);
-                message_id = *((uint32_t *) &header_full[8]);
-                ESP_LOGI(TAG, "new packet: %d %d %d %d", command, size, verif, message_id);
-                if(verif == 0xADDE) {
-                    receiving = 1;
-                    fsob_start_timeout();
-                    recv = 0;
+                    //Check the payload header
+                    command = *((uint16_t *) &header_full[0]);
+                    size = *((uint32_t *) &header_full[2]);
+                    verif = *((uint16_t *) &header_full[6]);
+                    message_id = *((uint32_t *) &header_full[8]);
+                    ESP_LOGI(TAG, "new packet: %d %d %d %d", command, size, verif, message_id);
+                    if(verif == 0xADDE) {
+                        receiving = 1;
+                        fsob_start_timeout();
+                        recv = 0;
+                        continue_reading = !(xRingbufferGetCurFreeSize(buf_handle) == CONFIG_DRIVER_FSOVERBUS_NOBACKEND_HELPER_Size);
+                    } else {
+                        receiving = 0;
+                        ESP_LOGI(TAG, "Packet header not correct.");
+                        clearBuffer();
+                        //Received wrong command, flushing uart queue
+                    }
+
                 } else {
-                    receiving = 0;
-                    ESP_LOGI(TAG, "Packet header not correct.");
-                    clearBuffer();
-                    //Received wrong command, flushing uart queue
+                    fsob_start_timeout();
+                    continue_reading = 0;
                 }
-
             } else {
-                fsob_start_timeout();
-            }
-        } else {
-            fsob_stop_timeout();    //Stop timeout time since we have received some data
-            size_t data_sz;
-            size_t max_read = min(RD_BUF_SIZE, size-recv);
-            uint8_t *data = (uint8_t *) xRingbufferReceiveUpTo(buf_handle, &data_sz, 0, max_read);
-            recv += data_sz;
-            ESP_LOGD(TAG, "len: %d, recv: %d, size: %d", size, recv, data_sz);
-            handleFSCommand(data, command, message_id, size, recv, data_sz);
-            vRingbufferReturnItem(buf_handle, data);
-            if(recv == size) {
-                receiving = 0;
-                ESP_LOGD(TAG, "Packet receive complete");                
-            } else {
-                fsob_start_timeout(); //Re enable the timeout timer since the message is still not fully received
+                fsob_stop_timeout();    //Stop timeout time since we have received some data
+                size_t data_sz;
+                size_t max_read = min(RD_BUF_SIZE, size-recv);
+                uint8_t *data = (uint8_t *) xRingbufferReceiveUpTo(buf_handle, &data_sz, 0, max_read);
+                if(data != NULL) {
+                    recv += data_sz;
+                    ESP_LOGD(TAG, "len: %d, recv: %d, size: %d", size, recv, data_sz);
+                    handleFSCommand(data, command, message_id, size, recv, data_sz);
+                    vRingbufferReturnItem(buf_handle, data);
+                    if(recv == size) {
+                        receiving = 0;
+                        ESP_LOGD(TAG, "Packet receive complete");                
+                    } else {
+                        fsob_start_timeout(); //Re enable the timeout timer since the message is still not fully received
+                    }
+                }
+                continue_reading = !(xRingbufferGetCurFreeSize(buf_handle) == CONFIG_DRIVER_FSOVERBUS_NOBACKEND_HELPER_Size);
             }
         }
     }
@@ -121,12 +130,10 @@ void fsob_reset()  {
 }
 
 void fsob_receive_bytes(uint8_t *data, size_t len) {
-    uint32_t avail = xRingbufferGetCurFreeSize(buf_handle);
-    while(avail < len) {
+    while(xRingbufferSend(buf_handle, data, len, pdMS_TO_TICKS(1000)) == pdFALSE) {
         vTaskDelay(1);
-        avail = xRingbufferGetCurFreeSize(buf_handle);
-    }
-    xRingbufferSend(buf_handle, data, len, pdMS_TO_TICKS(1000));
+        xTaskNotifyGive(fsob_task_handle);
+    }    
     xTaskNotifyGive(fsob_task_handle);  //Notify the fsoverbus worker thread there is data to be processed
 }
 #else

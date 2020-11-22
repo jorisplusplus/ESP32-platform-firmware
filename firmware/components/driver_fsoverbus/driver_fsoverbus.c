@@ -172,32 +172,37 @@ spi_device_interface_config_t devcfg={
     };
 
 void process_miso(uint8_t *data) {
+    static uint32_t counter = 0;
+
     ESP_LOGD(TAG, "%x %x %x %x %x %x %x %x %x", data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
     if(data[1] == 0xF0) {
-        ESP_LOGD(TAG, "Data to fsoverbus");
         uint8_t valid_bytes = data[0];
+        counter += valid_bytes;
+        ESP_LOGD(TAG, "Total received: %d", counter);        
         fsob_receive_bytes(&data[2], valid_bytes);
+                
     }
 }
 
 void stm32_task() {
     for( ;; ) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY );
+        spi_device_acquire_bus(handle, portMAX_DELAY);
         while(!gpio_get_level(GPIO_NUM_0)) {
-                
-                uint8_t mosi[18] = {0};
-                uint8_t miso[18] = {0};
-                spi_transaction_t t = {
-                .length = 18*8,
-                .rxlength = 18*8,
-                .tx_buffer = mosi,
-                .rx_buffer = miso
-                };
-                spi_device_transmit(handle, &t);
-                process_miso(&miso[9]);
-                ESP_LOGI(TAG, "Fetching spi ver: %d", miso[7]);
-                ets_delay_us(500);
-            }
+            uint8_t mosi[18] = {0};
+            uint8_t miso[18] = {0};
+            spi_transaction_t t = {
+            .length = 18*8,
+            .rxlength = 18*8,
+            .tx_buffer = mosi,
+            .rx_buffer = miso
+            };
+            spi_device_transmit(handle, &t);
+            process_miso(&miso[9]);
+            ESP_LOGI(TAG, "Fetching spi ver: %d", miso[7]);
+            ets_delay_us(1000);
+        }
+        spi_device_release_bus(handle);
     }
 }
 
@@ -222,6 +227,7 @@ void spi_init() {
 }
 
 void fsob_write_bytes(const char *src, size_t size) {
+    spi_device_acquire_bus(handle, portMAX_DELAY);
     while (size > 0) {
         uint8_t mosi[18] = {0};
         uint8_t miso[18] = {0};
@@ -236,9 +242,10 @@ void fsob_write_bytes(const char *src, size_t size) {
         .tx_buffer = mosi,
         .rx_buffer = miso
         };
-        spi_device_transmit(handle, &t);
+        spi_device_transmit(handle, &t);        
         process_miso(&miso[9]);        
     }
+    spi_device_release_bus(handle);
 }
 
 
@@ -256,7 +263,7 @@ esp_err_t driver_fsoverbus_init(void) {
 
     ESP_LOGI(TAG, "fs over bus registered.");
     
-    timeout = xTimerCreate("FSoverBUS_timeout", 50, false, 0, vTimeoutFunction);
+    timeout = xTimerCreate("FSoverBUS_timeout", 100, false, 0, vTimeoutFunction);
     return ESP_OK;
 } 
 
