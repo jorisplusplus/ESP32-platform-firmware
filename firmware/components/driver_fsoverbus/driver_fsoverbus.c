@@ -38,6 +38,7 @@ TimerHandle_t timeout;
 RingbufHandle_t buf_handle[2];
 
 
+
 uint8_t command_in[1024];
 
 
@@ -184,11 +185,15 @@ void process_miso(uint8_t *data) {
     }
 }
 
+SemaphoreHandle_t SemaphoreHandle1 = NULL;
+
 void stm32_task() {
     for( ;; ) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY );
+        xSemaphoreTake(SemaphoreHandle1, portMAX_DELAY);
         spi_device_acquire_bus(handle, portMAX_DELAY);
         while(!gpio_get_level(GPIO_NUM_0)) {
+            ets_delay_us(1000); //Delay here to not overload the stm32
             uint8_t mosi[18] = {0};
             uint8_t miso[18] = {0};
             spi_transaction_t t = {
@@ -200,9 +205,9 @@ void stm32_task() {
             spi_device_transmit(handle, &t);
             process_miso(&miso[9]);
             ESP_LOGI(TAG, "Fetching spi ver: %d", miso[7]);
-            ets_delay_us(1000);
         }
         spi_device_release_bus(handle);
+        xSemaphoreGive(SemaphoreHandle1);
     }
 }
 
@@ -212,7 +217,10 @@ void gpio0_intr() {
      xTaskNotifyGive(stm32_task_handle);
 }
 
+
+
 void spi_init() {
+    SemaphoreHandle1 = xSemaphoreCreateMutex();
     esp_err_t res = spi_bus_initialize(VSPI_HOST, &buscfg, 1);
     gpio_set_direction(19, GPIO_MODE_OUTPUT);
     spi_bus_add_device(VSPI_HOST, &devcfg, &handle);
@@ -226,16 +234,17 @@ void spi_init() {
 
 }
 
-void fsob_write_bytes(const char *src, size_t size) {
+void fsob_write_bytes(const char *src, size_t src_size) {
+    xSemaphoreTake(SemaphoreHandle1, portMAX_DELAY);
     spi_device_acquire_bus(handle, portMAX_DELAY);
-    while (size > 0) {
+    while (src_size > 0) {
         uint8_t mosi[18] = {0};
         uint8_t miso[18] = {0};
         mosi[1] = 0xF0;
-        mosi[0] = min(size, 12);
+        mosi[0] = min(src_size, 12);
         memcpy(&mosi[2], src, mosi[0]);
         src += mosi[0]; //Increment src pointer with bytes copied
-        size = size - mosi[0]; //Decrement remaining bytes to transmit
+        src_size = src_size - mosi[0]; //Decrement remaining bytes to transmit
         spi_transaction_t t = {
         .length = 18*8,
         .rxlength = 18*8,
@@ -246,6 +255,7 @@ void fsob_write_bytes(const char *src, size_t size) {
         process_miso(&miso[9]);        
     }
     spi_device_release_bus(handle);
+    xSemaphoreGive(SemaphoreHandle1);
 }
 
 
