@@ -51,10 +51,10 @@ int filefunction_size = 7;
 
 void handleFSCommand(uint8_t *data, uint16_t command, uint32_t message_id, uint32_t size, uint32_t received, uint32_t length) {
     static uint32_t write_pos;
-    if(received == length) { //First packet
+    if(received == length) { //First data of the packet
         write_pos = 0;
-        //ESP_LOGI(TAG, "clear");
     }
+
     if(length > 0) {
         memcpy(&command_in[write_pos], data, length);
         write_pos += length;
@@ -70,8 +70,7 @@ void handleFSCommand(uint8_t *data, uint16_t command, uint32_t message_id, uint3
             return_val = filefunction[command-4096](command_in, command, message_id, size, received, length);
         }
     }
-    //ESP_LOGI(TAG, "%d", return_val);
-    if(return_val) {    //Function has indicated that payload should write at start of buffer.
+    if(return_val) {    //Function has indicated that next payload should write at start of buffer.
         write_pos = 0;
     }
 }
@@ -112,8 +111,6 @@ spi_device_interface_config_t devcfg={
 
 void process_miso(uint8_t *data) {
     static uint32_t counter = 0;
-
-    //ESP_LOGI(TAG, "%x %x %x %x %x %x %x %x %x", data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
     if(data[1] == 0xF0) {
         uint8_t valid_bytes = data[0];
         counter += valid_bytes;

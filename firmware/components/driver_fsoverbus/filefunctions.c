@@ -111,7 +111,7 @@ int writefile(uint8_t *data, uint16_t command, uint32_t message_id, uint32_t siz
 
 
     if(received == length) {        //Opening new file, cleaning up statics just in case
-        ESP_LOGI(TAG, "New file");
+        //ESP_LOGI(TAG, "New file");
         if(fptr) fclose(fptr);
         failed_open = 0;
         fptr = NULL;
@@ -134,7 +134,7 @@ int writefile(uint8_t *data, uint16_t command, uint32_t message_id, uint32_t siz
                         fwrite(&data[i+1], 1, received-i-1, fptr);
                     }
                 } else {
-                    //ESP_LOGI(TAG, "Open failed");
+                    ESP_LOGI(TAG, "Open failed");
                     failed_open = 1;
                 }
 
@@ -153,7 +153,6 @@ int writefile(uint8_t *data, uint16_t command, uint32_t message_id, uint32_t siz
                 return 1;
             }
         }
-        //ESP_LOGI(TAG, "No filename");
         return 0;   //Found no 0 terminator. File path not received.
     } else if(fptr) {
         ESP_LOGI(TAG, "fptr: %d %d", (uint32_t) data, length);
@@ -186,7 +185,6 @@ int delfile(uint8_t *data, uint16_t command, uint32_t message_id, uint32_t size,
     buildfile((char *) data, dir_name);
     ESP_LOGI(TAG, "Source: %s", data);
     ESP_LOGI(TAG, "Deleting: %s", dir_name);
-    //ESP_LOGI(TAG, "Del: %s", dir_name);
     
     if(remove(dir_name) == 0) {
         sendok(command, message_id);
@@ -216,7 +214,6 @@ int cpyfile(uint8_t *data, uint16_t command, uint32_t size, uint32_t received, u
     }
 
     if(isfolder) {
-        //ESP_LOGI(TAG, "ADding filename: %s", (char *) &data[filename_index]);
         strcat((char *) dest, (char *) &data[filename_index]);
         dest_len = strlen((char *) dest);
     }
@@ -226,8 +223,8 @@ int cpyfile(uint8_t *data, uint16_t command, uint32_t size, uint32_t received, u
     char dest_file[dest_len+30];
     buildfile((char *) dest, dest_file);
 
-    //ESP_LOGI(TAG, "source: %s", source_file);
-    //ESP_LOGI(TAG, "dest: %s", dest_file);
+    ESP_LOGI(TAG, "source: %s", source_file);
+    ESP_LOGI(TAG, "dest: %s", dest_file);
 
     if(strcmp(source_file, dest_file) == 0) return 0;   //If dest and source are the same return error
 
@@ -281,7 +278,7 @@ int makedir(uint8_t *data, uint16_t command, uint32_t message_id, uint32_t size,
 
     char dir_name[size+20];   //Take length of the folder and add the spiflash mountpoint
     buildfile((char *) data, dir_name);
-    //ESP_LOGI(TAG, "mkdir: %s", dir_name);
+    ESP_LOGI(TAG, "mkdir: %s", dir_name);
 
     if(mkdir(dir_name, 0777) == 0) {
         sendok(command, message_id);
