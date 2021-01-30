@@ -32,15 +32,12 @@
 
 void vTimeoutFunction( TimerHandle_t xTimer );
 
-#define TAG "fsoverbus"
+#define TAG "FSoverBus"
 
 TimerHandle_t timeout;
 RingbufHandle_t buf_handle[2];
 
-
-
 uint8_t command_in[1024];
-
 
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 
@@ -84,65 +81,6 @@ void vTimeoutFunction( TimerHandle_t xTimer ) {
     fsob_reset();
 }
 
-static ssize_t bypass_write(int fd, const void * data, size_t size)
-{  
-    if(fd > 1) {
-        ESP_LOGW(TAG, "Wrong fd %d", fd);
-        return 0;
-    }
-    return xRingbufferSend(buf_handle[fd], data, size, pdMS_TO_TICKS(1))*size;
-}
-
-static int bypass_open(const char * path, int flags, int mode) {
-    if(strcmp("/1", path) == 0) {
-        return 0;
-    } else if(strcmp("/2", path) == 0) {
-        return 1;
-    }
-    ESP_LOGW(TAG, "wrond mountpoint %s", path);
-    return 2;
-}
-
-static int bypass_fstat(int fd, struct stat * st) {
-    return 0;
-}
-
-static int bypass_close(int fd) {
-    return 0;
-}
-
-static ssize_t bypass_read(int fd, void* data, size_t size) {
-        //Receive data from byte buffer
-    if(fd > 1) {
-        ESP_LOGW(TAG, "Wrong fd %d", fd);
-        return 0;
-    }
-    size_t item_size;
-    if(fd == 1) size = 1;   //Bit of an hack. Read seem to always be of length 128, this forces stdin of mp to only read 1ch
-    char *item = (char *)xRingbufferReceiveUpTo(buf_handle[fd], &item_size, pdMS_TO_TICKS(1), size);
-    
-    //Check received data
-    if (item != NULL) {
-        //Print item
-        memcpy(data, item, item_size);
-        //Return Item
-        vRingbufferReturnItem(buf_handle[fd], (void *)item);
-        return item_size;
-    } else {
-        //Failed to receive item
-        return 0;
-    }
-}
-
-esp_vfs_t myfs = {
-.flags = ESP_VFS_FLAG_DEFAULT,
-.write = &bypass_write,
-.open = &bypass_open,
-.fstat = &bypass_fstat,
-.close = &bypass_close,
-.read = &bypass_read,
-};
-
 void fsob_stop_timeout() {
      xTimerStop(timeout, 1);
 }
@@ -175,7 +113,7 @@ spi_device_interface_config_t devcfg={
 void process_miso(uint8_t *data) {
     static uint32_t counter = 0;
 
-    ESP_LOGD(TAG, "%x %x %x %x %x %x %x %x %x", data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
+    //ESP_LOGI(TAG, "%x %x %x %x %x %x %x %x %x", data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
     if(data[1] == 0xF0) {
         uint8_t valid_bytes = data[0];
         counter += valid_bytes;
@@ -192,6 +130,7 @@ void stm32_task() {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY );
         xSemaphoreTake(SemaphoreHandle1, portMAX_DELAY);
         spi_device_acquire_bus(handle, portMAX_DELAY);
+        ESP_LOGI(TAG, "Acquired spi");
         while(!gpio_get_level(GPIO_NUM_0)) {
             ets_delay_us(1000); //Delay here to not overload the stm32
             uint8_t mosi[18] = {0};
@@ -204,8 +143,8 @@ void stm32_task() {
             };
             spi_device_transmit(handle, &t);
             process_miso(&miso[9]);
-            ESP_LOGI(TAG, "Fetching spi ver: %d", miso[7]);
         }
+        ESP_LOGI(TAG, "Released spi");
         spi_device_release_bus(handle);
         xSemaphoreGive(SemaphoreHandle1);
     }
@@ -220,7 +159,8 @@ void gpio0_intr() {
 
 
 void spi_init() {
-    SemaphoreHandle1 = xSemaphoreCreateMutex();
+    SemaphoreHandle1 = xSemaphoreCreateBinary();
+    xSemaphoreGive(SemaphoreHandle1);
     esp_err_t res = spi_bus_initialize(VSPI_HOST, &buscfg, 1);
     gpio_set_direction(19, GPIO_MODE_OUTPUT);
     spi_bus_add_device(VSPI_HOST, &devcfg, &handle);
@@ -237,7 +177,9 @@ void spi_init() {
 void fsob_write_bytes(const char *src, size_t src_size) {
     xSemaphoreTake(SemaphoreHandle1, portMAX_DELAY);
     spi_device_acquire_bus(handle, portMAX_DELAY);
+    ESP_LOGI(TAG, "Acquired spi");
     while (src_size > 0) {
+        ets_delay_us(1000); //Delay here to not overload the stm32
         uint8_t mosi[18] = {0};
         uint8_t miso[18] = {0};
         mosi[1] = 0xF0;
@@ -254,6 +196,7 @@ void fsob_write_bytes(const char *src, size_t src_size) {
         spi_device_transmit(handle, &t);        
         process_miso(&miso[9]);        
     }
+    ESP_LOGI(TAG, "Released spi");
     spi_device_release_bus(handle);
     xSemaphoreGive(SemaphoreHandle1);
 }
@@ -266,8 +209,6 @@ esp_err_t driver_fsoverbus_init(void) {
     buf_handle[0] = xRingbufferCreate(2048, RINGBUF_TYPE_BYTEBUF);
     buf_handle[1] = xRingbufferCreate(2048, RINGBUF_TYPE_BYTEBUF);
 
-    ESP_ERROR_CHECK(esp_vfs_register("/dev/fsou", &myfs, NULL));
-    
     fsob_init();
     spi_init();
 
